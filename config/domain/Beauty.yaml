@@ -1,0 +1,9 @@
+name: Beauty
+path: data/abe/Beauty
+max_seq_len: 50
+hp:
+  embedding_dim: 384
+  num_heads: 1
+  num_layers: 1
+  learning_rate: 0.0001381974485212053
+  dropout: 0.3886937232135497

@@ -1,0 +1,9 @@
+name: Movie
+path: data/amb/Movie
+max_seq_len: 50
+hp:
+  embedding_dim: 128
+  num_heads: 1
+  num_layers: 5
+  learning_rate: 0.0002621512298137849
+  dropout: 0.6375399157279565

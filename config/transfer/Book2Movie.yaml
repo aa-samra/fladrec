@@ -1,0 +1,9 @@
+name: Book2Movie
+hp:
+  dropout: 0.5087898063305278
+  proj_hidden_dim: 768
+  proj_num_layers: 2
+  normalize_cd: true
+  learning_rate_src: 5.822529815468042e-07
+  learning_rate_tgt: 1.193321786331025e-06
+  learning_rate_fuse: 4.175950107512835e-05

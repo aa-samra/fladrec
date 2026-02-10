@@ -3,12 +3,18 @@ import torch
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
+import polars as pl
+import numpy as np
+import torch.nn as nn
+
 
 from fladrec.models.sasrec import SASRecPlusEncoder
 from fladrec.models.fl_models import TargetSASRec
 
 from fladrec.data.cd_tools import seek_source_batch
 from fladrec.data.sequential import TrainDataset
+
+from fladrec.evaluation.eval import eval_model, get_eval_dataloader, infer_users
 
 
 torch.set_float32_matmul_precision('high')
@@ -83,3 +89,68 @@ def train_sasrec_cd(
             global_batch_i += 1
 
     return src_model.state_dict(), tgt_model.state_dict()
+
+class TargetSASRecWrapper(nn.Module):
+    """
+    Wraps TargetSASRec so it can be used with eval_model, which expects model(batch).
+    """
+    def __init__(self, model, cd_emb, cd_user_ids):
+        super().__init__()
+        self.model = model
+        self.cd_emb = cd_emb
+        self.cd_user_ids = cd_user_ids
+        self.item_embeddings = model.item_embeddings
+        self._num_items = model._num_items
+
+    def forward(self, batch):
+        return self.model(batch, cd_emb=self.cd_emb, cd_user_ids=self.cd_user_ids)
+
+def extract_source_emb(src_model, src_train_dataset, src_device):
+    src_model.eval()
+
+    train_df = src_train_dataset._dataset
+    src_users = train_df.select('uid').unique().to_numpy().flatten()
+    fake_items = np.ones_like(src_users, dtype=np.int64)
+    fake_tmp = 100000000 * np.ones_like(src_users, dtype=np.int64) + 1
+
+    void_eval_df = pl.DataFrame(
+    {
+        'uid': src_users,
+        'item_id': fake_items.reshape(-1, 1),
+        'timestamp': fake_tmp
+    }
+    )
+    _, src_dataloader = get_eval_dataloader(
+            train_df, void_eval_df, 
+            max_seq_len=50, 
+            batch_size=256,
+            eval_mode='first')
+    
+    with torch.no_grad():
+        rets = infer_users(src_dataloader, src_model, src_device)
+    
+    user_ids, user_embedding, targets = rets      
+    return user_embedding, user_ids 
+
+
+def evaluate_cd_model(src_model, tgt_model, eval_dataloader, src_train_dataset, src_device, tgt_device, eval_setup):
+    tgt_model.eval()
+    src_model.eval()
+    
+    downvote_seen = eval_setup.get('downvote_seen', False)
+    sample_metric = eval_setup.get('sample_metrics', 0)
+
+    cd_emb, cd_user_ids = extract_source_emb(src_model, src_train_dataset, src_device)
+    cd_emb = cd_emb.to(tgt_device)
+    cd_user_ids = cd_user_ids.to(tgt_device)
+
+    print("intersection: ", len(np.intersect1d(
+        cd_user_ids.cpu().numpy(),
+        eval_dataloader.dataset._dataset['uid'].to_numpy()
+    )))
+    with torch.no_grad():
+        wrapped_model = TargetSASRecWrapper(tgt_model, cd_emb, cd_user_ids)
+        metrics = eval_model(eval_dataloader, wrapped_model, device=tgt_device, downvote_seen=downvote_seen, sample_metric=sample_metric)
+    return metrics
+
+

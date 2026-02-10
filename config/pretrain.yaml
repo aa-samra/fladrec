@@ -1,0 +1,30 @@
+defaults:
+  - _self_
+  - domain: ${domain}
+  - eval_setup: benchmark
+
+domain: Food # This can be overridden from command line
+eval_setup: benchmark
+
+# Model parameters
+loss_type: "ce"
+batch_size: 128
+max_seq_len: 50
+seed: 42
+
+# Training parameters
+device: "cuda"
+num_epochs: 100 # Increased epochs for non-tuning run with early stopping
+do_autocast: false
+grad_accum_steps: 1
+
+# Learning rate scheduling
+decay_lr: true
+
+# Model saving
+checkpoint_dir: 'checkpoints'
+
+# Miscellaneous
+suffix: ""
+fastloader: false
+no_train_on_eval: false

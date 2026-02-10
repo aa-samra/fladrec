@@ -1,0 +1,9 @@
+name: Kitchen2Food
+hp:
+  dropout: 0.5206757532662802
+  proj_hidden_dim: 256
+  proj_num_layers: 2
+  normalize_cd: false
+  learning_rate_src: 1.6453567210068515e-05
+  learning_rate_tgt: 2.2689409765414236e-05
+  learning_rate_fuse: 0.000644339843934069

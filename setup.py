@@ -21,7 +21,7 @@ def read_requirements(filename):
         return requirements
 
 # Read different requirement files
-install_requires = read_requirements('requirements.txt') + read_requirements('requirements-dev.txt')
+install_requires = read_requirements('requirements.txt')
 
 setup(
     name="Fedrated_Adaptation_CDR",

@@ -8,13 +8,13 @@ jupyter_client
 jupyter_core         
 kagglehub
 matplotlib
-numpy==2.3.2
+numpy
 optuna
 optuna-dashboard
 polars
 pyarrow
 PyYAML        
-scipy==1.16.1
-torch==2.8.0
+scipy
+torch
 tqdm
 hydra-core

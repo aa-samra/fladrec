@@ -167,8 +167,12 @@ def eval_model(eval_dataloader, model, device, downvote_seen, sample_metric=None
     target = Targets(user_ids=torch.arange(len(ranked_items), device=device),
                      item_ids=[item.reshape(-1) for item in target_items])
     
-    # metric_names = [f'{name}@{k}' for name in ["recall", "ndcg"] for k in [5, 10]]
-    metric_names = [f'{name}@{k}' for name in ["recall", "ndcg", "coverage"] for k in [10, 50, 100]]
+    if sample_metric:
+        ks = [5, 10]
+    else:
+        ks = [10, 50, 100]
+    
+    metric_names = [f'{name}@{k}' for name in ["recall", "ndcg", "coverage"] for k in ks]
 
     if sample_metric:
         metric_names.append(f'mrr@{sample_metric+1}')

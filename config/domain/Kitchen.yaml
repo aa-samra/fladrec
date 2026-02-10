@@ -1,0 +1,9 @@
+name: Kitchen
+path: data/afk/Kitchen
+max_seq_len: 50
+hp:
+  embedding_dim: 384
+  num_heads: 1
+  num_layers: 1
+  learning_rate: 8.162985846581806e-05
+  dropout: 0.2663385137326435

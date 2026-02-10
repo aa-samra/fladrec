@@ -1,0 +1,4 @@
+validation_metric: "ndcg@10"
+eval_mode: "last"
+sample_metrics: 999
+downvote_seen: true

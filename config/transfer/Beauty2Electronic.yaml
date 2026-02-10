@@ -1,0 +1,9 @@
+name: Beauty2Electronic
+hp:
+  dropout: 0.03954744352285075
+  proj_hidden_dim: 1024
+  proj_num_layers: 4
+  normalize_cd: true
+  learning_rate_src: 1.1399787894922989e-07
+  learning_rate_tgt: 1.886021953688631e-06
+  learning_rate_fuse: 0.002556034918402055

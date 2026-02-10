@@ -1,0 +1,9 @@
+name: Food
+path: data/afk/Food
+max_seq_len: 50
+hp:
+  embedding_dim: 256
+  num_heads: 1
+  num_layers: 1
+  learning_rate: 0.0022817329217205847
+  dropout: 0.47882377569210255

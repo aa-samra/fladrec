@@ -1,0 +1,22 @@
+defaults:
+  - _self_
+  - transfer: ${transfer}
+  - eval_setup: benchmark
+
+transfer: Food2Kitchen
+
+src_device: "cuda:0"
+tgt_device: "cuda:0"
+
+fusion_mode: "add-before-norm"
+
+train_src_item_emb: false
+train_src_encoder: true
+train_tgt_item_emb: false
+
+epochs: 50
+seed: 42
+max_patience: 10
+fastloader: false
+batch_size: 64
+checkpoint_dir: 'checkpoints'
