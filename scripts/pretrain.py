@@ -117,9 +117,7 @@ def main(cfg) -> None:
         num_layers=hp.num_layers,
         dropout=hp.dropout,
     ).to(cfg.device)
-
-    logger.info("Model architecture:\n%s", model)
-
+    
     optimizer = torch.optim.Adam(model.parameters(), lr=hp.learning_rate)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99 if cfg.decay_lr else 1.0)
 

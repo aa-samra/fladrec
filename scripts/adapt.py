@@ -157,8 +157,6 @@ def main(cfg):
         else:
             param.requires_grad = True   
 
-    logger.info("Adaptation model created:\n%s", tgt_model)
-
     src_optimizer = torch.optim.Adam([
         {'params': src_model.parameters(), 'lr': cfg.transfer.hp.learning_rate_src},
     ])
