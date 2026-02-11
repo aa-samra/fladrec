@@ -24,7 +24,7 @@ def read_requirements(filename):
 install_requires = read_requirements('requirements.txt')
 
 setup(
-    name="Fedrated_Adaptation_CDR",
+    name="fladrec",
     version="0.1.0",
     packages=find_packages(),
     install_requires=install_requires,

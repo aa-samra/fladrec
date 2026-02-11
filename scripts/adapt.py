@@ -114,7 +114,7 @@ def main(cfg):
         embedding_dim=src_domain_cfg.hp.embedding_dim,
         num_heads=src_domain_cfg.hp.num_heads,
         num_layers=src_domain_cfg.hp.num_layers,
-        dropout=cfg.hp.dropout,
+        dropout=cfg.transfer.hp.dropout,
         max_sequence_length=src_domain_cfg.max_seq_len,
     ).to(cfg.src_device)
 
@@ -142,7 +142,7 @@ def main(cfg):
         cd_emb_dim=src_domain_cfg.hp.embedding_dim,
         num_heads=tgt_domain_cfg.hp.num_heads,
         num_layers=tgt_domain_cfg.hp.num_layers,
-        dropout=cfg.hp.dropout,
+        dropout=cfg.transfer.hp.dropout,
         max_sequence_length=tgt_domain_cfg.max_seq_len,
         proj_hidden_dim=cfg.transfer.hp.proj_hidden_dim,
         proj_num_layers=cfg.transfer.hp.proj_num_layers,
