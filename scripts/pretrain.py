@@ -14,9 +14,11 @@ from fladrec.evaluation.eval import eval_model, get_eval_dataloader
 from fladrec.models.sasrec import SASRecPlusEncoder
 from fladrec.training.single_domain import train_sasrec
 
+from fladrec.utils.reproducibility import seed_everything, make_deterministic, seed_worker
+
+
 import hydra
 
-torch.set_float32_matmul_precision('high')
 
 def seed_everything(seed):
     random.seed(seed)
@@ -54,7 +56,7 @@ def main(cfg) -> None:
 
     # 2. Seed and setup
     seed_everything(cfg.seed)
-    torch.set_float32_matmul_precision('high')
+    make_deterministic(cfg.seed)
 
     data_path = Path(hydra.utils.to_absolute_path(cfg.domain.path))
     
@@ -73,17 +75,21 @@ def main(cfg) -> None:
     train_dataset = TrainDataset(dataset=train_df, num_items=num_items,
                                  max_seq_len=cfg.max_seq_len, num_neg_items=0)
 
+    g = torch.Generator()
+    g.manual_seed(cfg.seed)
+    
     train_dataloader = DataLoader(
         dataset=train_dataset,
         batch_size=cfg.batch_size,
         collate_fn=collate_fn,
         drop_last=True,
         shuffle=True,
-        num_workers=2,
+        num_workers=1,
+        worker_init_fn=seed_worker,
+        generator=g,
         prefetch_factor=4,
         pin_memory=('cuda' in cfg.device),
-        persistent_workers=('cuda' in cfg.device),
-        pin_memory_device=cfg.device if 'cuda' in cfg.device else None,
+        # pin_memory_device=cfg.device if 'cuda' in cfg.device else None,
     )
 
     if cfg.get('fastloader', False):
@@ -117,7 +123,7 @@ def main(cfg) -> None:
         num_layers=hp.num_layers,
         dropout=hp.dropout,
     ).to(cfg.device)
-    
+    print(model._item_embeddings.weight.data.sum().item())
     optimizer = torch.optim.Adam(model.parameters(), lr=hp.learning_rate)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99 if cfg.decay_lr else 1.0)
 

@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 import pickle as pkl
 import torch
+import os 
 from torch.utils.data import DataLoader
 import hydra
 from omegaconf import OmegaConf
@@ -16,14 +17,12 @@ from fladrec.models.sasrec import SASRecPlusEncoder
 from fladrec.models.fl_models import TargetSASRec
 from fladrec.training.cross_domain import train_sasrec_cd, evaluate_cd_model
 
+from fladrec.utils.reproducibility import seed_everything, make_deterministic, seed_worker
+
+
 
 torch.set_float32_matmul_precision('high')
 
-def seed_everything(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 def get_domain_data(domain_cfg, cfg):
     """Loads and preprocesses data for a single domain."""
@@ -38,6 +37,10 @@ def get_domain_data(domain_cfg, cfg):
 
     train_dataset = TrainDataset(dataset=train_df, num_items=num_items,
                                  max_seq_len=domain_cfg.max_seq_len, num_neg_items=0)
+    
+    g = torch.Generator()
+    g.manual_seed(cfg.seed)
+    
 
     train_dataloader = DataLoader(
         dataset=train_dataset,
@@ -45,6 +48,8 @@ def get_domain_data(domain_cfg, cfg):
         collate_fn=collate_fn,
         drop_last=True,
         shuffle=True,
+        generator=g,
+        worker_init_fcn=seed_worker,
         num_workers=2,
         prefetch_factor=4,
         pin_memory=True,
@@ -84,6 +89,8 @@ def main(cfg):
 
     # 2. Setup
     seed_everything(cfg.seed)
+    make_deterministic(cfg.seed)
+
     src_domain_name, tgt_domain_name = cfg.transfer.name.split('2')
 
     # 3. Load Domain Specific Configs
