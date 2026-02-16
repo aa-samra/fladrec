@@ -18,3 +18,4 @@ scipy
 torch
 tqdm
 hydra-core
+markupsafe==2.1.5
