@@ -8,20 +8,6 @@ from torch.utils.data import DataLoader
 from fladrec.data.sequential import EvalDatasetGTS, collate_fn
 from .metrics import Targets, Ranked, calc_metrics
 
-def infer_users_(eval_dataloader: DataLoader, model: torch.nn.Module, device: str):
-    user_ids = []
-    user_embeddings = []
-
-    model.eval()
-    for batch in eval_dataloader:
-        for key in batch.keys():
-            batch[key] = batch[key].to(device)
-
-        user_ids.append(batch['user.ids'])  # (batch_size)
-        user_embeddings.append(model(batch))  # (batch_size, embedding_dim)
-
-    return torch.cat(user_ids, dim=0), torch.cat(user_embeddings, dim=0)
-
 def infer_users(eval_dataloader: DataLoader, model: torch.nn.Module, device: str):
     user_ids = []
     user_embeddings = []
@@ -38,12 +24,6 @@ def infer_users(eval_dataloader: DataLoader, model: torch.nn.Module, device: str
 
     return torch.cat(user_ids, dim=0), torch.cat(user_embeddings, dim=0), torch.cat(targets, dim=0)
 
-
-def sample_excluding_numpy(N, S, k=999):
-    S = np.array(list(S))
-    population = np.setdiff1d(np.arange(1, N + 1), S, assume_unique=False)
-    return np.random.choice(population, size=k, replace=False)
-
 def recommend(
     eval_dataloader,
     model,
@@ -51,7 +31,7 @@ def recommend(
     k=100,
     downvote_seen=True,
     return_uid=False,
-    sample_metric=None, 
+    sample_metric=0, 
 ):
     item_embedding = infer_items(model)  # [num_items, dim]
     num_items = item_embedding.size(0)
@@ -74,17 +54,7 @@ def recommend(
             # full scores
             scores = user_embeddings @ item_embedding.T  # [B, num_items]
 
-            if downvote_seen:
-                seen_idx = batch['seen.ids']
-                lengths = batch['seen.length']
-                user_idx = torch.repeat_interleave(
-                    torch.arange(len(lengths), device=device), lengths
-                )
-                scores[user_idx, seen_idx] = -torch.inf
-                scores[:, 0] = -torch.inf  # padding item
-
-            # ---------- NEW: sampled metric ----------
-            if sample_metric is not None:
+            if sample_metric:
                 seen_idx = batch['seen.ids']
                 lengths = batch['seen.length']
                 user_idx = torch.repeat_interleave(
@@ -103,6 +73,14 @@ def recommend(
                 topk_idx = torch.topk(sampled_scores, k=k, dim=1).indices
                 recs = sampled_items.gather(1, topk_idx)
             else:
+                if downvote_seen:
+                    seen_idx = batch['seen.ids']
+                    lengths = batch['seen.length']
+                    user_idx = torch.repeat_interleave(
+                        torch.arange(len(lengths), device=device), lengths
+                    )
+                    scores[user_idx, seen_idx] = -torch.inf
+                    scores[:, 0] = -torch.inf  # padding item
                 recs = torch.topk(scores, k=k).indices
             # ----------------------------------------
 
@@ -118,10 +96,6 @@ def recommend(
         )
     else:
         return torch.cat(ranked_items, dim=0), torch.cat(target_items, dim=0)
-
-    
-        
-
 
 def infer_items(model: SASRecEncoder):
     return model.item_embeddings.weight.data
@@ -156,7 +130,7 @@ def get_eval_dataloader(train_df, eval_df, max_seq_len, batch_size, seed=42, eva
     return eval_df, eval_dataloader
 
 
-def eval_model(eval_dataloader, model, device, downvote_seen, sample_metric=None):
+def eval_model(eval_dataloader, model, device, downvote_seen, sample_metric=0):
     model.eval()
     with torch.inference_mode():
         ranked_items, target_items = recommend(eval_dataloader=eval_dataloader, k=100, downvote_seen=downvote_seen, model=model, device=device, sample_metric=sample_metric)
