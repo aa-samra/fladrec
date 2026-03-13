@@ -5,8 +5,8 @@ defaults:
 
 transfer: Food2Kitchen
 
-src_device: "cuda:0"
-tgt_device: "cuda:0"
+src_device: "cuda"
+tgt_device: "cuda"
 
 fusion_mode: "add-before-norm"
 
@@ -14,9 +14,10 @@ train_src_item_emb: false
 train_src_encoder: true
 train_tgt_item_emb: false
 
-epochs: 50
+epochs: 100
 seed: 42
 max_patience: 10
-fastloader: false
-batch_size: 64
+fastloader: true
+batch_size: 128
 checkpoint_dir: 'checkpoints'
+phase: test # or train

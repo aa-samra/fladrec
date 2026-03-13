@@ -26,5 +26,6 @@ checkpoint_dir: 'checkpoints'
 
 # Miscellaneous
 suffix: ""
-fastloader: false
+fastloader: true
+phase: train # or test
 no_train_on_eval: false

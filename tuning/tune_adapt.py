@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 import logging
 import os
+import shutil
 
 # Configure logging for the tuning script
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -16,13 +17,13 @@ def objective(trial, transfer_name):
     """
     # Define hyperparameter search space
     hp = {
-        'dropout': trial.suggest_uniform('dropout', 0.1, 0.5),
-        'proj_hidden_dim': trial.suggest_categorical('proj_hidden_dim', [128, 256, 512, 768]),
+        'dropout': trial.suggest_float('dropout', 0.1, 0.5),
+        'proj_hidden_dim': trial.suggest_categorical('proj_hidden_dim', [128, 256, 512, 768, 1024, 1536, 2084]),
         'proj_num_layers': trial.suggest_categorical('proj_num_layers', [1, 2, 3]),
         'normalize_cd': trial.suggest_categorical('normalize_cd', [True, False]),
-        'learning_rate_src': trial.suggest_loguniform('learning_rate_src', 1e-7, 1e-3),
-        'learning_rate_tgt': trial.suggest_loguniform('learning_rate_tgt', 1e-7, 1e-3),
-        'learning_rate_fuse': trial.suggest_loguniform('learning_rate_fuse', 1e-6, 1e-2),
+        'learning_rate_src': trial.suggest_float('learning_rate_src', 1e-7, 1e-3, log=True),
+        'learning_rate_tgt': trial.suggest_float('learning_rate_tgt', 1e-7, 1e-3, log=True),
+        'learning_rate_fuse': trial.suggest_float('learning_rate_fuse', 1e-6, 1e-2, log=True),
     }
 
     # Load base transfer config
@@ -36,7 +37,7 @@ def objective(trial, transfer_name):
             base_config = yaml.safe_load(f)
 
     # Create new transfer config for the trial
-    trial_transfer_name = f"{transfer_name}_{trial.number}"
+    trial_transfer_name = f"{transfer_name}_{trial.number:02d}"
     trial_config = {
         'name': trial_transfer_name,
         'hp': hp
@@ -53,6 +54,7 @@ def objective(trial, transfer_name):
         sys.executable,
         'scripts/adapt.py',
         f'transfer={trial_transfer_name}',
+        f'phase=train',
     ]
 
     logging.info(f"Trial {trial.number}: Running command: {' '.join(command)}")
@@ -95,11 +97,11 @@ def objective(trial, transfer_name):
         logging.error(f"Trial {trial.number}: adapt.py failed with exit code {e.returncode}.")
         logging.error(f"Stdout: {e.stdout}")
         logging.error(f"Stderr: {e.stderr}")
-        return -1 # Return a poor value
+        return -1
     except json.JSONDecodeError as e:
         logging.error(f"Trial {trial.number}: Failed to decode JSON from adapt.py output.")
         logging.error(f"Received output: {json_output}")
-        return -1 # Return a poor value
+        return -1
     except Exception as e:
         logging.error(f"An unexpected error occurred during trial {trial.number}: {e}")
         return -1
@@ -108,6 +110,37 @@ def objective(trial, transfer_name):
         if trial_config_path.exists():
             os.remove(trial_config_path)
             logging.info(f"Cleaned up trial config: {trial_config_path}")
+
+
+def checkpoint_callback(study, trial):
+    """After each trial: keep only the best checkpoints, renamed without suffix."""
+    checkpoints_dir = Path('checkpoints')
+    suffix = f"_{trial.number:02d}"
+
+    # The two model files saved by adapt.py for this trial
+    trial_files = [
+        checkpoints_dir / f"{study.user_attrs.get('transfer_name', '')}_{trial.number:02d}_best_model.pth",
+        checkpoints_dir / f"{study.user_attrs.get('transfer_name', '')}_{trial.number:02d}_best_src_model.pth",
+    ]
+
+    if study.best_trial.number == trial.number:
+        # This trial is the new best — rename to remove the numeric suffix
+        for trial_path in trial_files:
+            if trial_path.exists():
+                best_path = trial_path.parent / trial_path.name.replace(suffix, "")
+                # Remove any previously promoted best checkpoint
+                if best_path.exists():
+                    best_path.unlink()
+                trial_path.rename(best_path)
+                logging.info(f"Promoted checkpoint: {trial_path.name} → {best_path.name}")
+            else:
+                logging.warning(f"Expected checkpoint not found: {trial_path}")
+    else:
+        # Not the best — delete
+        for trial_path in trial_files:
+            if trial_path.exists():
+                trial_path.unlink()
+                logging.info(f"Deleted non-best checkpoint: {trial_path.name}")
 
 
 if __name__ == '__main__':
@@ -131,9 +164,10 @@ if __name__ == '__main__':
         direction='maximize',
         load_if_exists=True
     )
+    study.set_user_attr('transfer_name', transfer_name)
 
     logging.info(f"Starting Optuna study '{study_name}' for transfer '{transfer_name}' with {n_trials} trials.")
-    study.optimize(lambda trial: objective(trial, transfer_name), n_trials=n_trials)
+    study.optimize(lambda trial: objective(trial, transfer_name), n_trials=n_trials, callbacks=[checkpoint_callback])
 
     print("Study statistics: ")
     print("  Number of finished trials: ", len(study.trials))
@@ -146,7 +180,7 @@ if __name__ == '__main__':
         print("      {}: {}".format(key, value))
 
     # Save the best hyperparameters to a yaml file
-    best_config_path = Path(f'config/transfer/{transfer_name}_best_params.yaml')
+    best_config_path = Path(f'config/transfer/{transfer_name}.yaml')
     
     # Recreate the best config
     best_hp = study.best_trial.params.copy()

@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 import logging
 import os
+import shutil
 
 # Configure logging for the tuning script
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -23,13 +24,8 @@ def objective(trial, domain):
         'dropout': trial.suggest_uniform('dropout', 0.1, 0.5)
     }
 
-    loss_type = trial.suggest_categorical('loss_type', ['ce', 'bce', 'sce'])
+    loss_type = 'ce'
     
-    if loss_type in ['bce', 'sce']:
-        hp['num_neg_items'] = trial.suggest_categorical('num_neg_items', [1, 16, 32, 64])
-    if loss_type == 'sce':
-        hp['sce_alpha'] = trial.suggest_int('sce_alpha', 1, 4)
-
     # Load base domain config
     base_config_path = Path(f'config/domain/{domain}.yaml')
     if not base_config_path.exists():
@@ -40,7 +36,7 @@ def objective(trial, domain):
         base_config = yaml.safe_load(f)
 
     # Create new domain config for the trial
-    trial_domain_name = f"{domain}_{trial.number}"
+    trial_domain_name = f"{domain}_{trial.number:02d}"
     trial_config = {
         'name': trial_domain_name,
         'path': base_config['path'],
@@ -59,7 +55,8 @@ def objective(trial, domain):
         sys.executable,
         'scripts/pretrain.py',
         f'domain={trial_domain_name}',
-        f'loss_type={loss_type}'
+        f'loss_type={loss_type}',
+        f'phase=train'
     ]
 
     logging.info(f"Trial {trial.number}: Running command: {' '.join(command)}")
@@ -102,11 +99,11 @@ def objective(trial, domain):
         logging.error(f"Trial {trial.number}: pretrain.py failed with exit code {e.returncode}.")
         logging.error(f"Stdout: {e.stdout}")
         logging.error(f"Stderr: {e.stderr}")
-        return -1 # Return a poor value
+        return -1
     except json.JSONDecodeError as e:
         logging.error(f"Trial {trial.number}: Failed to decode JSON from pretrain.py output.")
         logging.error(f"Received output: {json_output}")
-        return -1 # Return a poor value
+        return -1
     except Exception as e:
         logging.error(f"An unexpected error occurred during trial {trial.number}: {e}")
         return -1
@@ -117,9 +114,35 @@ def objective(trial, domain):
             logging.info(f"Cleaned up trial config: {trial_config_path}")
 
 
+def checkpoint_callback(study, trial):
+    """After each trial: keep only the best checkpoint, renamed without suffix."""
+    checkpoints_dir = Path('checkpoints')  # adjust if your checkpoint dir differs
+
+    for item in checkpoints_dir.glob(f"*_{trial.number:02d}*"):
+        if study.best_trial.number == trial.number:
+            # This trial is the new best — rename to remove the numeric suffix
+            best_name = item.name.replace(f"_{trial.number:02d}", "")
+            best_path = item.parent / best_name
+            # Remove any previously promoted best checkpoint
+            if best_path.exists():
+                if best_path.is_dir():
+                    shutil.rmtree(best_path)
+                else:
+                    best_path.unlink()
+            item.rename(best_path)
+            logging.info(f"Promoted checkpoint: {item.name} → {best_name}")
+        else:
+            # Not the best — delete it
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+            logging.info(f"Deleted non-best checkpoint: {item.name}")
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print("Usage: python scripts/tune_pretrain.py <domain_name> [n_trials]")
+        print("Usage: python tuning/tune_pretrain.py <domain_name> [n_trials]")
         sys.exit(1)
 
     domain_name = sys.argv[1]
@@ -140,7 +163,7 @@ if __name__ == '__main__':
     )
 
     logging.info(f"Starting Optuna study '{study_name}' for domain '{domain_name}' with {n_trials} trials.")
-    study.optimize(lambda trial: objective(trial, domain_name), n_trials=n_trials)
+    study.optimize(lambda trial: objective(trial, domain_name), n_trials=n_trials, callbacks=[checkpoint_callback])
 
     print("Study statistics: ")
     print("  Number of finished trials: ", len(study.trials))
@@ -154,12 +177,12 @@ if __name__ == '__main__':
 
     # The config for the best trial is already saved as config/domain/<domain>_<best_trial_number>.yaml
     # during the run, but it's cleaned up afterwards. Let's save the best one again.
-    best_trial_domain_name = f"{domain_name}_{study.best_trial.number}"
-    best_config_path = Path(f'config/domain/{domain_name}_best_params.yaml')
+    best_trial_domain_name = f"{domain_name}_{study.best_trial.number:02d}"
+    best_config_path = Path(f'config/domain/{domain_name}.yaml')
     
     # Recreate the best config
     best_hp = study.best_trial.params.copy()
-    loss_type = best_hp.pop('loss_type') # loss_type is not part of hp
+    loss_type = best_hp.pop('loss_type', 'ce')  # loss_type is not part of hp
     
     # Load base domain config
     base_config_path = Path(f'config/domain/{domain_name}.yaml')

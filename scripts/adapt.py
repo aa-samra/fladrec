@@ -252,12 +252,12 @@ def main(cfg):
                 patience = 0
                 best_target_metric = target_metric
                 best_metrics = metrics
-                best_tgt_checkpoint = tgt_model.state_dict()
+                best_tgt_checkpoint = deepcopy(tgt_model.state_dict())
                 # save only trainble source params 
                 best_src_checkpoint = {}
                 for name, param in src_model.named_parameters():
                     if param.requires_grad:
-                        best_src_checkpoint[name] = param.data.clone()
+                        best_src_checkpoint[name] = deepcopy(param.data.clone())
 
                 logger.info(f"Found new best model with {validation_metric}: {best_target_metric:.4f}")
                 checkpoint_dir = Path(cfg.checkpoint_dir)
@@ -299,8 +299,8 @@ def main(cfg):
             eval_setup=cfg.eval_setup
         )
 
-        logger.info("Adaptation script finished for %s.", cfg.transfer.name, 'with metrics: ')
-        logger.info(str(metrics))
+        logger.info("Adaptation script finished for %s.", cfg.transfer.name)
+        logger.info('with metrics: %s', str(metrics))
         import json
         print(json.dumps(metrics))
     except Exception as ee:
