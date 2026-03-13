@@ -8,6 +8,7 @@ import polars as pl
 import pickle as pkl
 import torch
 from torch.utils.data import DataLoader
+from copy import deepcopy
 
 from fladrec.data.sequential import TrainDataset, collate_fn, GPUSASRecDataloader
 from fladrec.evaluation.eval import eval_model, get_eval_dataloader
@@ -62,9 +63,22 @@ def main(cfg) -> None:
         data_path = Path(hydra.utils.to_absolute_path(cfg.domain.path))
         
         logger.debug('Preprocessing data from: %s', data_path)
-        train_df = pl.scan_parquet(data_path / f'train.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
-        val_df = pl.scan_parquet(data_path / f'val.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
-        test_df = pl.scan_parquet(data_path / f'test.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+
+        if cfg.phase=='train':
+            train_scanner = pl.scan_parquet(data_path / f'train.parquet')
+            test_scanner = val_scanner = pl.scan_parquet(data_path / f'val.parquet') # use the same validation split for final scoring
+        elif cfg.phase=='test':
+            train_scanner = pl.concat([
+                pl.scan_parquet(data_path / f'train.parquet'), 
+                pl.scan_parquet(data_path / f'val.parquet')
+                ])
+            test_scanner = val_scanner = pl.scan_parquet(data_path / f'test.parquet')  # validate on the test split for early stopping
+
+
+        train_df = train_scanner.group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+        val_df = val_scanner.group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+        test_df = test_scanner.group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+
         
         with open(data_path / f'item_id_to_idx.pkl', 'rb') as f:
             item_id_to_idx = pkl.load(f)
@@ -163,7 +177,7 @@ def main(cfg) -> None:
                 patience = 0
                 best_target_metric = target_metric
                 best_metrics = metrics
-                best_checkpoint = checkpoint
+                best_checkpoint = deepcopy(checkpoint)
                 logger.info(f"Found new best model with {validation_metric}: {best_target_metric:.4f}")
                 checkpoint_dir = Path(cfg.checkpoint_dir)
                 checkpoint_dir.mkdir(exist_ok=True)
@@ -197,6 +211,7 @@ def main(cfg) -> None:
         import json
         print(json.dumps(metrics))
     except Exception as ee:
+        raise ee
         logger.info(ee.__str__())
 
 if __name__ == '__main__':

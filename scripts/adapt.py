@@ -7,15 +7,18 @@ import polars as pl
 import pickle as pkl
 import torch
 import os 
+from copy import deepcopy
 from torch.utils.data import DataLoader
 import hydra
 from omegaconf import OmegaConf
+from torch.optim.lr_scheduler import LambdaLR, ExponentialLR, SequentialLR
 
 from fladrec.data.sequential import TrainDataset, collate_fn, GPUSASRecDataloader
 from fladrec.evaluation.eval import eval_model, get_eval_dataloader
 from fladrec.models.sasrec import SASRecPlusEncoder
 from fladrec.models.fl_models import TargetSASRec
 from fladrec.training.cross_domain import train_sasrec_cd, evaluate_cd_model
+
 
 from fladrec.utils.reproducibility import seed_everything, make_deterministic, seed_worker
 
@@ -28,7 +31,15 @@ def get_domain_data(domain_cfg, cfg):
     """Loads and preprocesses data for a single domain."""
     data_path = Path(hydra.utils.to_absolute_path(domain_cfg.path))
     
-    train_df = pl.scan_parquet(data_path / 'train.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+    if cfg.phase=='train':
+        train_scanner = pl.scan_parquet(data_path / f'train.parquet')
+    elif cfg.phase=='test':
+        train_scanner = pl.concat([
+            pl.scan_parquet(data_path / f'train.parquet').with_columns(pl.col("item_id").cast(pl.Int64)), 
+            pl.scan_parquet(data_path / f'val.parquet').with_columns(pl.col("item_id").cast(pl.Int64))
+            ])
+
+    train_df = train_scanner.group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
     
     with open(data_path / 'item_id_to_idx.pkl', 'rb') as f:
         item_id_to_idx = pkl.load(f)
@@ -49,14 +60,11 @@ def get_domain_data(domain_cfg, cfg):
         drop_last=True,
         shuffle=True,
         generator=g,
-        worker_init_fcn=seed_worker,
+        worker_init_fn=seed_worker,
         num_workers=2,
         prefetch_factor=4,
         pin_memory=True,
     )
-
-    if cfg.get('fastloader', False):
-        train_dataloader = GPUSASRecDataloader(train_dataloader, cfg.tgt_device)
 
     return train_df, train_dataloader, num_items, item_id_to_idx
 
@@ -93,7 +101,9 @@ def main(cfg):
         seed_everything(cfg.seed)
         make_deterministic(cfg.seed)
 
-        src_domain_name, tgt_domain_name = cfg.transfer.name.split('2')
+        # remove suffix 
+        transfer_name = cfg.transfer.name.split('_')[0]
+        src_domain_name, tgt_domain_name = transfer_name.split('2')
 
         # 3. Load Domain Specific Configs
         src_domain_cfg_path = Path(hydra.utils.get_original_cwd()) / f'config/domain/{src_domain_name}.yaml'
@@ -104,17 +114,28 @@ def main(cfg):
         # 4. Load Data
         logger.info("Loading source domain data: %s", src_domain_name)
         src_train_df, src_train_dataloader, src_num_items, _ = get_domain_data(src_domain_cfg, cfg)
+        src_train_dataset = TrainDataset(src_train_df, num_items=src_num_items, 
+                                         max_seq_len=src_domain_cfg.max_seq_len, 
+                                         num_neg_items=0)
 
         logger.info("Loading target domain data: %s", tgt_domain_name)
         tgt_train_df, tgt_train_dataloader, tgt_num_items, _ = get_domain_data(tgt_domain_cfg, cfg)
 
-        tgt_val_df = pl.scan_parquet(Path(hydra.utils.to_absolute_path(tgt_domain_cfg.path)) / 'val.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
-        tgt_test_df = pl.scan_parquet(Path(hydra.utils.to_absolute_path(tgt_domain_cfg.path)) / 'test.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+        if cfg.phase=='train':
+            test_split = 'val'
+        elif cfg.phase=='test':
+            test_split = 'test'
+
+        tgt_val_df = pl.scan_parquet(Path(hydra.utils.to_absolute_path(tgt_domain_cfg.path)) / f'{test_split}.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
+        tgt_test_df = pl.scan_parquet(Path(hydra.utils.to_absolute_path(tgt_domain_cfg.path)) / f'{test_split}.parquet').group_by('uid').agg(pl.col("item_id"), pl.col('timestamp')).collect()
         _, tgt_eval_dataloader = get_eval_dataloader(tgt_train_df, tgt_val_df,
                                                     tgt_domain_cfg.max_seq_len,
                                                     cfg.batch_size * 4,
                                                     seed=cfg.seed,
                                                     eval_mode=cfg.eval_setup.eval_mode)
+        
+        if cfg.get('fastloader', False):
+            tgt_train_dataloader = GPUSASRecDataloader(tgt_train_dataloader, cfg.tgt_device)
 
         logger.info("Loading pre-trained source model...")
         
@@ -135,13 +156,13 @@ def main(cfg):
             else:
                 param.requires_grad = False
 
-        checkpoint_path = Path(cfg.checkpoint_dir) / f'{src_domain_name}_best_model.pth'
-        if not checkpoint_path.exists():
-            logger.error("Pretrained model checkpoint not found at: %s", checkpoint_path)
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        src_checkpoint_path = Path(cfg.checkpoint_dir) / f'{src_domain_name}_best_model.pth'
+        if not src_checkpoint_path.exists():
+            logger.error("Pretrained source model checkpoint not found at: %s", src_checkpoint_path)
+            raise FileNotFoundError(f"Checkpoint not found: {src_checkpoint_path}")
             
-        src_model.load_state_dict(torch.load(checkpoint_path))
-        logger.info("Pre-trained model loaded successfully from %s", checkpoint_path)
+        src_model.load_state_dict(torch.load(src_checkpoint_path))
+        logger.info("Pre-trained source model loaded successfully from %s", src_checkpoint_path)
 
 
         tgt_model = TargetSASRec(
@@ -158,6 +179,16 @@ def main(cfg):
             normalize_cd=cfg.transfer.hp.normalize_cd,
         ).to(cfg.tgt_device)
 
+        tgt_checkpoint_path = Path(cfg.checkpoint_dir) / f'{tgt_domain_name}_best_model.pth'
+        if not tgt_checkpoint_path.exists():
+            logger.error("Pretrained target model checkpoint not found at: %s", tgt_checkpoint_path)
+            raise FileNotFoundError(f"Checkpoint not found: {tgt_checkpoint_path}")
+            
+        tgt_model.load_state_dict(torch.load(tgt_checkpoint_path), strict=False)
+        logger.info("Pre-trained target model loaded successfully from %s", tgt_checkpoint_path)
+
+
+
         for name, param in tgt_model.named_parameters():
             if cfg.train_tgt_item_emb and 'item_embedding' in name:
                 param.requires_grad = True
@@ -173,6 +204,12 @@ def main(cfg):
             {'params': tgt_model._encoder.parameters(), 'lr': cfg.transfer.hp.learning_rate_tgt},
             {'params': tgt_model._projector.parameters(), 'lr': cfg.transfer.hp.learning_rate_fuse},
         ])
+
+        warmup_epochs = 10
+        warmup_scheduler = LambdaLR(tgt_optimizer, lr_lambda=lambda epoch: (epoch + 1) / warmup_epochs)
+        decay_scheduler = ExponentialLR(tgt_optimizer, gamma=0.99)
+        tgt_scheduler = SequentialLR(tgt_optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_epochs])
+
         best_target_metric = 0
         best_checkpoint = None
         patience = 0
@@ -211,11 +248,11 @@ def main(cfg):
             metric_k = int(validation_metric.split('@')[1])
             target_metric = metrics[metric_name][metric_k]
 
-            if target_metric > best_target_metric:
+            if target_metric > 1.005 * best_target_metric:
                 patience = 0
                 best_target_metric = target_metric
                 best_metrics = metrics
-                best_checkpoint = tgt_model.state_dict()
+                best_tgt_checkpoint = tgt_model.state_dict()
                 # save only trainble source params 
                 best_src_checkpoint = {}
                 for name, param in src_model.named_parameters():
@@ -226,7 +263,7 @@ def main(cfg):
                 checkpoint_dir = Path(cfg.checkpoint_dir)
                 checkpoint_dir.mkdir(exist_ok=True)
                 save_path = checkpoint_dir / f'{cfg.transfer.name}_best_model.pth'
-                torch.save(best_checkpoint, save_path)
+                torch.save(best_tgt_checkpoint, save_path)
 
                 src_save_path = checkpoint_dir / f'{cfg.transfer.name}_best_src_model.pth'
                 torch.save(best_src_checkpoint, src_save_path)
@@ -245,8 +282,8 @@ def main(cfg):
         # Test 
         logger.info("Testing best model...")
 
-        tgt_model.load_state_dict(best_checkpoint)
-        src_model.load_state_dict(best_src_checkpoint)
+        tgt_model.load_state_dict(best_tgt_checkpoint)
+        src_model.load_state_dict(best_src_checkpoint, strict=False)
         _, tgt_test_dataloader = get_eval_dataloader(tgt_train_df, tgt_test_df,
                                                     tgt_domain_cfg.max_seq_len,
                                                     cfg.batch_size * 4,
@@ -256,18 +293,19 @@ def main(cfg):
             src_model=src_model,
             tgt_model=tgt_model,
             eval_dataloader=tgt_test_dataloader,
-            src_train_dataset=src_train_df,
+            src_train_dataset=src_train_dataset,
             src_device=cfg.src_device,
             tgt_device=cfg.tgt_device,
             eval_setup=cfg.eval_setup
         )
 
         logger.info("Adaptation script finished for %s.", cfg.transfer.name, 'with metrics: ')
-        logger.info(metrics)
+        logger.info(str(metrics))
         import json
         print(json.dumps(metrics))
     except Exception as ee:
-        logger.info(ee.__str__())
+        # logger.info(ee.__str__())
+        raise ee
 
 if __name__ == "__main__":
     main()
