@@ -2,8 +2,8 @@ name: Electronic
 path: data/abe/Electronic
 max_seq_len: 50
 hp:
-  embedding_dim: 384
-  num_heads: 8
+  embedding_dim: 256
+  num_heads: 4
   num_layers: 1
-  learning_rate: 0.0004092058216697266
-  dropout: 0.3081767106640978
+  learning_rate: 0.0006860791172170231
+  dropout: 0.11198657558139709
