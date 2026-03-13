@@ -81,28 +81,25 @@ hp:
 
 ## Running a Single Experiment
 
-Experiments are run in a two-step process.
+Experiments are run in a two-step process. For each script, you can select the phase of training
+
+- Use `phase=train` to train on the `train` set and evaluate on `val` set.
+- Use `phase=test` to train on the `train+val` set and evaluate on `test` set.
+
 
 ### 1. Pre-training
 First, run `pretrain.py` to train the in-domain models for both the source and target domains. This step saves the pretrained model checkpoints.
 
 For example, to pretrain the 'Movie' domain model:
 ```bash
-python scripts/pretrain.py domain=Movie
+python scripts/pretrain.py domain=Movie phase=test
 ```
 
 ### 2. Adaptation
 Once you have the pretrained models, run `adapt.py` to train the adapter for a specific transfer task.
 
-- Use `phase=train` to train the adapter.
-- Use `phase=test` to evaluate the model on the test set.
-
 For example, to train and then test a transfer from 'Movie' to 'Book':
 ```bash
-# Training phase
-python scripts/adapt.py transfer=Movie2Book phase=train
-
-# Testing phase
 python scripts/adapt.py transfer=Movie2Book phase=test
 ```
 

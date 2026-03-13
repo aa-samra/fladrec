@@ -1,9 +1,9 @@
 name: Food2Kitchen
 hp:
-  dropout: 0.2087105677316377
-  proj_hidden_dim: 1024
-  proj_num_layers: 4
+  dropout: 0.12564433019201032
+  proj_hidden_dim: 256
+  proj_num_layers: 3
   normalize_cd: true
-  learning_rate_src: 4.085849971397245e-06
-  learning_rate_tgt: 0.00017486682616186
-  learning_rate_fuse: 8.008739120038222e-05
+  learning_rate_src: 1.863843901646104e-06
+  learning_rate_tgt: 3.282855101967566e-05
+  learning_rate_fuse: 1.166174159972082e-06
