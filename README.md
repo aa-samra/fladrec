@@ -1,8 +1,8 @@
 # FLADRec: Federated Adaptation for Cross-Domain Sequential Recommendation
 
 
-This repository contains the official implementation of the paper **FLADRec: Federated Adaptation for Cross-Domain Sequential Recommendation**. 
-This work proposes a simple and practical framework for cross-domain sequential recommendations that transfers information exclusively through learned user representations, without sharing raw interaction data or item embeddings across domains.
+This repository contains the official implementation of the paper entitled **Cross-Domain Sequential Recommendation with Representation-Level User Transfer** published in CIKM'26. 
+This work proposes FLADRec– a simple and practical framework for cross-domain sequential recommendations that transfers information exclusively through learned user representations, without sharing raw interaction data or item embeddings across domains.
 
 ![FLADRec Architecture](images/fladrec_arch.png)
 
